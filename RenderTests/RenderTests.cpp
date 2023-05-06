@@ -93,6 +93,7 @@ public:
 	MatrixXf verticies;
 	MatrixXi tris;
 	MatrixXf UVs;
+	MatrixXi UV_Map;
 	unsigned int color;
 
 	void rotate(float alpha, float beta, float gamma) {
@@ -232,7 +233,7 @@ void drawTri(const Point2D& v0, const Point2D& v1, const Point2D& v2, unsigned i
 				z = (v0.z * u + v1.z * v + v2.z * w);
 				if (z < z_buff[p.sx + p.sy * SCREEN_WIDTH]) {
 					//cout << z << endl;
-					color = (unsigned int)round(((255 / v0.z) * u) * z) << 24 | (unsigned int)round(((255 / v1.z) * v) * z) << 16 | (unsigned int)round(((255 / v2.z) * w) * z) << 8 | (unsigned int)(255);
+					color = (unsigned int)0 << 24 | (unsigned int)round(((255 / v1.z) * v) * z) << 16 | (unsigned int)round(((255 / v2.z) * w) * z) << 8 | (unsigned int)(255);
 
 					canvas[p.sx + p.sy * SCREEN_WIDTH] = color;
 					z_buff[p.sx + p.sy * SCREEN_WIDTH] = z;
@@ -258,18 +259,24 @@ void drawtriangle(unsigned int* canvas, Camera3D camera, Object3D object, int tr
 			v0.x = screen_space_coords(i, 0);
 			v0.y = screen_space_coords(i, 1);
 			v0.z = abs(screen_space_coords(i, 2));
+			v0.ux = object.UVs(object.UV_Map(tri, i), 0)/v0.z;
+			v0.uy = object.UVs(object.UV_Map(tri, i), 1)/v0.z;
 			v0.sx = (int)round(SCREEN_WIDTH * (screen_space_coords(i, 0) / abs(screen_space_coords(i, 2)) + .5));
 			v0.sy = (int)round(SCREEN_HEIGHT * (1-(screen_space_coords(i, 1) / abs(screen_space_coords(i, 2)) + .5)));
 		case 1:
 			v1.x = screen_space_coords(i, 0);
 			v1.y = screen_space_coords(i, 1);
 			v1.z = abs(screen_space_coords(i, 2));
+			v1.ux = object.UVs(object.UV_Map(tri, i), 0) / v0.z;
+			v1.uy = object.UVs(object.UV_Map(tri, i), 1) / v0.z;
 			v1.sx = (int)round(SCREEN_WIDTH * (screen_space_coords(i, 0) / abs(screen_space_coords(i, 2)) + .5));
 			v1.sy = (int)round(SCREEN_HEIGHT * (1 - (screen_space_coords(i, 1) / abs(screen_space_coords(i, 2)) + .5)));
 		case 2:
 			v2.x = screen_space_coords(i, 0);
 			v2.y = screen_space_coords(i, 1);
 			v2.z = abs(screen_space_coords(i, 2));
+			v2.ux = object.UVs(object.UV_Map(tri, i), 0) / v2.z;
+			v2.uy = object.UVs(object.UV_Map(tri, i), 1) / v2.z;
 			v2.sx = (int)round(SCREEN_WIDTH * (screen_space_coords(i, 0) / abs(screen_space_coords(i, 2)) + .5));
 			v2.sy = (int)round(SCREEN_HEIGHT * (1 - (screen_space_coords(i, 1) / abs(screen_space_coords(i, 2)) + .5)));
 		}
@@ -353,14 +360,28 @@ int main(int argc, char* args[])
 		0,5,1,
 		0,4,5;
 
-	MatrixXf UVs(3, 2);
+	MatrixXf UVs(4, 2);
 	UVs << 0, 0,
 		0, 1,
 		1, 0,
 		1, 1;
 
-	Object3D cube{ Vector3f{0,0,0}, Vector3f{0,0,0}, Vertexes, Triangles, UVs, 0x00ff00ff};
-	Object3D cube2{ Vector3f{-2,0,-3}, Vector3f{0,.5,0}, Vertexes, Triangles, UVs, 0x00ff00ff };
+	MatrixXi UV_map(12, 3);
+	UV_map << 1,3,2,
+		1,2,0,
+		1,3,2,
+		1,2,0,
+		1,3,2,
+		1,2,0,
+		1,3,2,
+		1,2,0,
+		1,3,2,
+		1,2,0,
+		0,3,2,
+		0,1,3;
+
+	Object3D cube{ Vector3f{0,0,0}, Vector3f{0,0,0}, Vertexes, Triangles, UVs, UV_map, 0x00ff00ff};
+	//Object3D cube2{ Vector3f{-2,0,-3}, Vector3f{0,.5,0}, Vertexes, Triangles, UVs, UV_map, 0x00ff00ff };
 	//int Color_data[] = { 1,1,2,2,2,2,2,2,2,2,2,2 };
 	
 	Camera3D Camera{ Vector3f{-1,0,3},Vector3f{0,0,0}, 1 };
@@ -460,7 +481,7 @@ int main(int argc, char* args[])
 
 			//Camera.rotate(00.0, 0.0, 0.01);
 			drawObject(pixels, Camera, cube); 
-			drawObject(pixels, Camera, cube2);
+			//drawObject(pixels, Camera, cube2);
 
 			SDL_UpdateTexture(screen_texture, NULL, pixels, SCREEN_WIDTH * 4);
 
