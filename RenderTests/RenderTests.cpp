@@ -233,8 +233,11 @@ void drawTri(const Point2D& v0, const Point2D& v1, const Point2D& v2, unsigned i
 				z = (v0.z * u + v1.z * v + v2.z * w);
 				if (z < z_buff[p.sx + p.sy * SCREEN_WIDTH]) {
 					//cout << z << endl;
-					color = (unsigned int)0 << 24 | (unsigned int)round(((255 / v1.z) * v) * z) << 16 | (unsigned int)round(((255 / v2.z) * w) * z) << 8 | (unsigned int)(255);
+					p.ux = (v0.ux * u + v1.ux * v + v2.ux * w) * z;
+					p.uy = (v0.uy * u + v1.uy * v + v2.uy * w) * z;
 
+					color = (unsigned int)0 << 24 | (unsigned int)round(255.f * p.ux) << 16 | (unsigned int)round(255.f * p.uy) << 8 | (unsigned int)(255);
+					
 					canvas[p.sx + p.sy * SCREEN_WIDTH] = color;
 					z_buff[p.sx + p.sy * SCREEN_WIDTH] = z;
 				}
