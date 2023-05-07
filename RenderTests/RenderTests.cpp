@@ -25,7 +25,7 @@ const int SCREEN_HEIGHT = 900;
 double border_const = 0.001;
 uint64_t frame_timer = 0;
 uint64_t current_timer = 0;
-uint64_t one = 1000;
+int frame_counter = 0;
 
 //Main loop flag
 bool quit = false;
@@ -114,6 +114,7 @@ public:
 	MatrixXf Normals;
 	MatrixXi Normal_map;
 	Vector3f Material;
+	float Glossiness;
 
 	void rotate(float alpha, float beta, float gamma) {
 
@@ -233,7 +234,7 @@ void Barycentric(const Point2D& p, const Point2D& a, const Point2D& b, const Poi
 	u = 1.0f - v - w;
 }
 
-void drawTri(const Point2D& v0, const Point2D& v1, const Point2D& v2, Sun3D sun, Object3D object, unsigned int* canvas)
+void drawTri(const Point2D& v0, const Point2D& v1, const Point2D& v2, Sun3D sun, Object3D object, Camera3D camera, unsigned int* canvas)
 {
 	// Compute triangle bounding box
 	int minX = min({ v0.sx, v1.sx, v2.sx });
@@ -268,8 +269,13 @@ void drawTri(const Point2D& v0, const Point2D& v1, const Point2D& v2, Sun3D sun,
 					p.uy = (v0.uy * u + v1.uy * v + v2.uy * w) * z;
 					p.normal = (v0.normal * u + v1.normal * v + v2.normal * w) * z;
 					
+					Vector3f V = getVec(p.pos, camera.pos);
 					Vector3f L = getVec(p.pos, sun.pos);
+					Vector3f H = (L + V) / 2.f;
 					float Id = sun.intensity * object.Material(1) * max(L.dot(p.normal),0.f);
+					float Ia = sun.intensity * object.Material(0);
+					float Is = sun.intensity * object.Material(2) * max(pow(p.normal.dot(H), object.Glossiness),0.f);
+					float I = Id + Ia + Is;
 					//cout << L.dot(p.normal) << endl;
 					int texX = round(p.ux * x);
 					int texY = round(p.uy * y);
@@ -281,7 +287,7 @@ void drawTri(const Point2D& v0, const Point2D& v1, const Point2D& v2, Sun3D sun,
 					}
 					else {
 						//color = (unsigned int)0 << 24 | (unsigned int)round(255.f * p.ux) << 16 | (unsigned int)round(255.f * p.uy) << 8 | (unsigned int)(255);
-						color = ((unsigned int)round(Id * tex[3*texX + 3*texY * x])) << 24 | ((unsigned int)round(Id * tex[1+ 3 * texX + 3 * texY * x])) << 16 | ((unsigned int)round(Id * tex[2+ 3 * texX + 3 * texY * x])) << 8 | (unsigned int)(255);
+						color = ((unsigned int)round(min(I * tex[3*texX + 3*texY * x],255.f))) << 24 | ((unsigned int)round(min(I * tex[1+ 3 * texX + 3 * texY * x],255.f))) << 16 | ((unsigned int)round(min(I * tex[2+ 3 * texX + 3 * texY * x],255.f))) << 8 | (unsigned int)(255);
 					}
 					//color = (unsigned int)0 << 24 | (unsigned int)round(255.f * p.ux) << 16 | (unsigned int)round(255.f * p.uy) << 8 | (unsigned int)(255);
 					//color = ((unsigned int)(255*tex[texX + texY * x])) << 24 | ((unsigned int)(255 * tex[texX + texY * x])) << 16 | ((unsigned int)(255 * tex[texX + texY * x])) << 8 | (unsigned int)(255);
@@ -348,7 +354,7 @@ void drawtriangle(unsigned int* canvas, Camera3D camera, Sun3D sun, Object3D obj
 	}
 	
 	
-	drawTri(v0, v1, v2, sun, object, canvas);
+	drawTri(v0, v1, v2, sun, object, camera, canvas);
 	
 }
 
@@ -466,7 +472,7 @@ int main(int argc, char* args[])
 		3, 3, 3,
 		3, 3, 3;
 
-	Object3D cube{ Vector3f{0,0,0}, Vector3f{0,0,0}, Vertexes, Triangles, UVs, UV_map, Normals, Normal_map, Vector3f{ 0,0.18,0 } };
+	Object3D cube{ Vector3f{0,0,0}, Vector3f{0,0,0}, Vertexes, Triangles, UVs, UV_map, Normals, Normal_map, Vector3f{ 0.1,0.18,.2 }, 10 };
 
 	//Object3D cube2{ Vector3f{-2,0,-3}, Vector3f{0,.5,0}, Vertexes, Triangles, UVs, UV_map, 0x00ff00ff };
 	//int Color_data[] = { 1,1,2,2,2,2,2,2,2,2,2,2 };
@@ -578,10 +584,17 @@ int main(int argc, char* args[])
 			SDL_RenderCopy(renderer, screen_texture, NULL, NULL);
 			//SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255);
 			SDL_RenderPresent(renderer);
-			system("cls");
+			
+			frame_counter += 1;
 			current_timer = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
-			cout << "FPS: " << one / (current_timer - frame_timer);
-			frame_timer = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
+			if ((current_timer - frame_timer) >= 1000) {
+				system("cls");
+				cout << "FPS: " << frame_counter;
+				frame_counter = 0;
+				frame_timer = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
+			}
+			
+			
 		}
 	}
 
