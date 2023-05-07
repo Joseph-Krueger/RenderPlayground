@@ -20,6 +20,7 @@ Matrix4f translateMatrix(Vector3f pos);
 //Screen dimension constants
 const int SCREEN_WIDTH = 900;
 const int SCREEN_HEIGHT = 900;
+float border_const = 0.001;
 
 //Main loop flag
 bool quit = false;
@@ -49,12 +50,12 @@ unsigned int colors[] = { 0xff00ffff, 0x00ffffff, 0xffff00ff, 0x00ff00ff, 0xff00
 
 int x, y, n;
 //int ok = stbi_info("../checkerboard.png", &x, &y, &n);
-float* tex = stbi_loadf("../textures/checkerboard.png", &x, &y, &n, STBI_rgb);
+unsigned char *tex = stbi_load("../textures/checkerboard.png", &x, &y, &n, STBI_rgb);
 
 struct Point2D {
 	float x, y, z;
 	int sx, sy;
-	float ux, uy;
+	double ux, uy;
 };
 
 struct Camera3D {
@@ -242,16 +243,22 @@ void drawTri(const Point2D& v0, const Point2D& v1, const Point2D& v2, unsigned i
 					//cout << z << endl;
 					p.ux = (v0.ux * u + v1.ux * v + v2.ux * w) * z;
 					p.uy = (v0.uy * u + v1.uy * v + v2.uy * w) * z;
-					
+					//cout << p.sx << endl;
 
 					int texX = round(p.ux * x);
 					int texY = round(p.uy * y);
 					//cout << tex[texX + texY * x] << endl;
 					//cout << tex[texX + texY * x] << ' ' << tex[1 + texX + texY * x] << " " << tex[2 + texX + texY * x] << endl;
 					
-
+					if (p.ux <= border_const || p.ux >= 1-border_const || p.uy <= border_const || p.uy >= 1-border_const) {
+						color = 0x000000ff;
+					}
+					else {
+						//color = (unsigned int)0 << 24 | (unsigned int)round(255.f * p.ux) << 16 | (unsigned int)round(255.f * p.uy) << 8 | (unsigned int)(255);
+						color = ((unsigned int)(tex[3*texX + 3*texY * x])) << 24 | ((unsigned int)(tex[1+ 3 * texX + 3 * texY * x])) << 16 | ((unsigned int)(tex[2+ 3 * texX + 3 * texY * x])) << 8 | (unsigned int)(255);
+					}
 					//color = (unsigned int)0 << 24 | (unsigned int)round(255.f * p.ux) << 16 | (unsigned int)round(255.f * p.uy) << 8 | (unsigned int)(255);
-					color = ((unsigned int)(255*tex[texX + texY * x])) << 24 | ((unsigned int)(255 * tex[texX + texY * x])) << 16 | ((unsigned int)(255 * tex[texX + texY * x])) << 8 | (unsigned int)(255);
+					//color = ((unsigned int)(255*tex[texX + texY * x])) << 24 | ((unsigned int)(255 * tex[texX + texY * x])) << 16 | ((unsigned int)(255 * tex[texX + texY * x])) << 8 | (unsigned int)(255);
 					//cout << color << endl;
 					canvas[p.sx + p.sy * SCREEN_WIDTH] = color;
 					z_buff[p.sx + p.sy * SCREEN_WIDTH] = z;
@@ -351,7 +358,6 @@ void handleInputs(SDL_Event e, Camera3D Camera) {
 
 int main(int argc, char* args[])
 {	
-	_control87(_DN_FLUSH, _MCW_DN);
 
 	MatrixXf Vertexes(8, 4); 
 	Vertexes << -.5, -.5, .5, 1,
@@ -402,7 +408,7 @@ int main(int argc, char* args[])
 	//Object3D cube2{ Vector3f{-2,0,-3}, Vector3f{0,.5,0}, Vertexes, Triangles, UVs, UV_map, 0x00ff00ff };
 	//int Color_data[] = { 1,1,2,2,2,2,2,2,2,2,2,2 };
 	
-	Camera3D Camera{ Vector3f{-1,0,3},Vector3f{0,0,0}, 1 };
+	Camera3D Camera{ Vector3f{0,0,3},Vector3f{0,0,0}, 1 };
 	
 	float alpha = 0.00;
 	float beta = 0.0;
@@ -482,6 +488,9 @@ int main(int argc, char* args[])
 						break;
 					case SDLK_z:
 						Camera.translate(0.f, -0.2f, 0.f);
+						break;
+					case SDLK_ESCAPE:
+						quit = true;
 						break;
 					default:
 						break;
