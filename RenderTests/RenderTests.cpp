@@ -8,9 +8,11 @@ and may not be redistributed without written permission.*/
 #include <Eigen/Dense>
 #include <time.h>
 #include <stb_image.h>
+#include <chrono>
 
 using namespace Eigen;
 using namespace std;
+using namespace std::chrono;
 
 
 
@@ -20,7 +22,10 @@ Matrix4f translateMatrix(Vector3f pos);
 //Screen dimension constants
 const int SCREEN_WIDTH = 900;
 const int SCREEN_HEIGHT = 900;
-float border_const = 0.001;
+double border_const = 0.001;
+uint64_t frame_timer = 0;
+uint64_t current_timer = 0;
+uint64_t one = 1000;
 
 //Main loop flag
 bool quit = false;
@@ -51,11 +56,15 @@ unsigned int colors[] = { 0xff00ffff, 0x00ffffff, 0xffff00ff, 0x00ff00ff, 0xff00
 int x, y, n;
 //int ok = stbi_info("../checkerboard.png", &x, &y, &n);
 unsigned char *tex = stbi_load("../textures/checkerboard.png", &x, &y, &n, STBI_rgb);
+//unsigned char *tex = stbi_load("../textures/tom1.jpg", &x, &y, &n, STBI_rgb);
 
 struct Point2D {
+public:
 	float x, y, z;
 	int sx, sy;
 	double ux, uy;
+	Vector3f normal{};
+	Vector3f pos;
 };
 
 struct Camera3D {
@@ -102,7 +111,9 @@ public:
 	MatrixXi tris;
 	MatrixXf UVs;
 	MatrixXi UV_Map;
-	unsigned int color;
+	MatrixXf Normals;
+	MatrixXi Normal_map;
+	Vector3f Material;
 
 	void rotate(float alpha, float beta, float gamma) {
 
@@ -121,6 +132,17 @@ public:
 		return output;
 	}
 };
+
+struct Sun3D {
+public:
+	Vector3f pos;
+	float intensity;
+	Vector3f color;
+};
+
+Vector3f getVec(Vector3f from_point, Vector3f to_point) {
+	return Vector3f{ to_point(0) - from_point(0),to_point(1) - from_point(1),to_point(2) - from_point(2) };
+}
 
 Matrix4f rotateMatrix(Vector3f rot) {
 	MatrixXf rotateZ(4, 4);
@@ -211,7 +233,7 @@ void Barycentric(const Point2D& p, const Point2D& a, const Point2D& b, const Poi
 	u = 1.0f - v - w;
 }
 
-void drawTri(const Point2D& v0, const Point2D& v1, const Point2D& v2, unsigned int* canvas, unsigned int color)
+void drawTri(const Point2D& v0, const Point2D& v1, const Point2D& v2, Sun3D sun, Object3D object, unsigned int* canvas)
 {
 	// Compute triangle bounding box
 	int minX = min({ v0.sx, v1.sx, v2.sx });
@@ -228,6 +250,7 @@ void drawTri(const Point2D& v0, const Point2D& v1, const Point2D& v2, unsigned i
 	// Rasterize
 	Point2D p;
 	float u, v, w;
+	unsigned int color = 0x000000ff;
 	for (p.sy = minY; p.sy <= maxY; p.sy++) {
 		for (p.sx = minX; p.sx <= maxX; p.sx++) {
 			// Determine barycentric coordinates
@@ -243,8 +266,11 @@ void drawTri(const Point2D& v0, const Point2D& v1, const Point2D& v2, unsigned i
 					//cout << z << endl;
 					p.ux = (v0.ux * u + v1.ux * v + v2.ux * w) * z;
 					p.uy = (v0.uy * u + v1.uy * v + v2.uy * w) * z;
-					//cout << p.sx << endl;
-
+					p.normal = (v0.normal * u + v1.normal * v + v2.normal * w) * z;
+					
+					Vector3f L = getVec(p.pos, sun.pos);
+					float Id = sun.intensity * object.Material(1) * max(L.dot(p.normal),0.f);
+					//cout << L.dot(p.normal) << endl;
 					int texX = round(p.ux * x);
 					int texY = round(p.uy * y);
 					//cout << tex[texX + texY * x] << endl;
@@ -255,7 +281,7 @@ void drawTri(const Point2D& v0, const Point2D& v1, const Point2D& v2, unsigned i
 					}
 					else {
 						//color = (unsigned int)0 << 24 | (unsigned int)round(255.f * p.ux) << 16 | (unsigned int)round(255.f * p.uy) << 8 | (unsigned int)(255);
-						color = ((unsigned int)(tex[3*texX + 3*texY * x])) << 24 | ((unsigned int)(tex[1+ 3 * texX + 3 * texY * x])) << 16 | ((unsigned int)(tex[2+ 3 * texX + 3 * texY * x])) << 8 | (unsigned int)(255);
+						color = ((unsigned int)round(Id * tex[3*texX + 3*texY * x])) << 24 | ((unsigned int)round(Id * tex[1+ 3 * texX + 3 * texY * x])) << 16 | ((unsigned int)round(Id * tex[2+ 3 * texX + 3 * texY * x])) << 8 | (unsigned int)(255);
 					}
 					//color = (unsigned int)0 << 24 | (unsigned int)round(255.f * p.ux) << 16 | (unsigned int)round(255.f * p.uy) << 8 | (unsigned int)(255);
 					//color = ((unsigned int)(255*tex[texX + texY * x])) << 24 | ((unsigned int)(255 * tex[texX + texY * x])) << 16 | ((unsigned int)(255 * tex[texX + texY * x])) << 8 | (unsigned int)(255);
@@ -269,57 +295,71 @@ void drawTri(const Point2D& v0, const Point2D& v1, const Point2D& v2, unsigned i
 	}
 }
 
-void drawtriangle(unsigned int* canvas, Camera3D camera, Object3D object, int tri, unsigned int color) {
+void drawtriangle(unsigned int* canvas, Camera3D camera, Sun3D sun, Object3D object, int tri) {
 	MatrixXf screen_space_coords(3, 4);
+	Vector3f normal_fixed;
 	Point2D v0{};
 	Point2D v1{};
 	Point2D v2{};
+	Vector4f inter{};
 	//cout << triangles << endl << endl;
 	for (int i = 0; i < 3; i++) {
 
 		screen_space_coords(i, all) << (camera.getCamera() * camera.getTransform() * object.getTransform() * object.verticies(object.tris(tri, i), all).transpose()).transpose();
-		//cout << cube.verticies(cube.tris(tri, i),all) << endl;
+		normal_fixed = ( rotateMatrix(object.rot)(seq(0,2),seq(0,2))*object.Normals(object.Normal_map(tri,i),all).transpose()).transpose();
+		inter = (object.getTransform() * object.verticies(object.tris(tri, i), all).transpose()).transpose();
+		//cout << rotateMatrix(object.rot)(seq(0, 2), seq(0, 2)) * object.Normals(object.Normal_map(tri, i), all).transpose() << endl;
+		
 		switch (i) {
 		case 0:
+			v0.pos = inter(seq(0,2));
 			v0.x = screen_space_coords(i, 0);
 			v0.y = screen_space_coords(i, 1);
 			v0.z = abs(screen_space_coords(i, 2));
+			v0.normal = normal_fixed / v0.z;
 			v0.ux = object.UVs(object.UV_Map(tri, i), 0)/v0.z;
 			v0.uy = object.UVs(object.UV_Map(tri, i), 1) / v0.z;
 			v0.sx = (int)round(SCREEN_WIDTH * (screen_space_coords(i, 0) / abs(screen_space_coords(i, 2)) + .5));
 			v0.sy = (int)round(SCREEN_HEIGHT * (1-(screen_space_coords(i, 1) / abs(screen_space_coords(i, 2)) + .5)));
+			
 		case 1:
+			v1.pos = inter(seq(0, 2));
 			v1.x = screen_space_coords(i, 0);
 			v1.y = screen_space_coords(i, 1);
 			v1.z = abs(screen_space_coords(i, 2));
+			v1.normal = normal_fixed / v1.z;
 			v1.ux = object.UVs(object.UV_Map(tri, i), 0)/ v1.z;
 			v1.uy = object.UVs(object.UV_Map(tri, i), 1)/ v1.z;
 			v1.sx = (int)round(SCREEN_WIDTH * (screen_space_coords(i, 0) / abs(screen_space_coords(i, 2)) + .5));
 			v1.sy = (int)round(SCREEN_HEIGHT * (1 - (screen_space_coords(i, 1) / abs(screen_space_coords(i, 2)) + .5)));
+			//v1.normal = normal_fixed / v1.z;
 		case 2:
+			v1.pos = inter(seq(0, 2));
 			v2.x = screen_space_coords(i, 0);
 			v2.y = screen_space_coords(i, 1);
 			v2.z = abs(screen_space_coords(i, 2));
+			v2.normal = normal_fixed / v2.z;
 			v2.ux = object.UVs(object.UV_Map(tri, i), 0) / v2.z;
 			v2.uy = object.UVs(object.UV_Map(tri, i), 1) / v2.z;
 			v2.sx = (int)round(SCREEN_WIDTH * (screen_space_coords(i, 0) / abs(screen_space_coords(i, 2)) + .5));
 			v2.sy = (int)round(SCREEN_HEIGHT * (1 - (screen_space_coords(i, 1) / abs(screen_space_coords(i, 2)) + .5)));
+			//v2.normal = normal_fixed / v2.z;
 		}
 	}
 	
 	
-	drawTri(v0, v1, v2, canvas, color);
+	drawTri(v0, v1, v2, sun, object, canvas);
 	
 }
 
-void drawObject(unsigned int* canvas, Camera3D camera, Object3D object) {
+void drawObject(unsigned int* canvas, Camera3D camera, Sun3D sun, Object3D object) {
 	
 	if ((camera.getForward().dot((object.pos - camera.pos).normalized()) >= -0.3)) {
 		return;
 	}
 	for (int tri = 0; tri < object.tris.rows() ; tri++) {
 		//cout << tri << endl;
-		drawtriangle(pixels, camera, object, tri, object.color);
+		drawtriangle(pixels, camera, sun, object, tri);
 	}
 }
 
@@ -404,12 +444,36 @@ int main(int argc, char* args[])
 		0,3,2,
 		0,1,3;
 
-	Object3D cube{ Vector3f{0,0,0}, Vector3f{0,0,0}, Vertexes, Triangles, UVs, UV_map, 0x00ff00ff};
+	MatrixXf Normals(6, 3);
+	Normals << 0, 0, 1,
+		0, 0, -1,
+		0, 1, 0,
+		0, -1, 0,
+		1, 0, 0,
+		-1, 0, 0;
+
+	MatrixXi Normal_map(12, 3);
+	Normal_map << 0, 0, 0,
+		0, 0, 0,
+		4, 4, 4,
+		4, 4, 4,
+		2, 2, 2,
+		2, 2, 2,
+		1, 1, 1,
+		1, 1, 1,
+		5, 5, 5,
+		5, 5, 5,
+		3, 3, 3,
+		3, 3, 3;
+
+	Object3D cube{ Vector3f{0,0,0}, Vector3f{0,0,0}, Vertexes, Triangles, UVs, UV_map, Normals, Normal_map, Vector3f{ 0,0.18,0 } };
+
 	//Object3D cube2{ Vector3f{-2,0,-3}, Vector3f{0,.5,0}, Vertexes, Triangles, UVs, UV_map, 0x00ff00ff };
 	//int Color_data[] = { 1,1,2,2,2,2,2,2,2,2,2,2 };
 	
 	Camera3D Camera{ Vector3f{0,0,3},Vector3f{0,0,0}, 1 };
-	
+	Sun3D Sun{ Vector3f{ -10,20,5 }, 1.f, Vector3f{ 255,255,255 } };
+
 	float alpha = 0.00;
 	float beta = 0.0;
 	float gamma = .0;
@@ -435,7 +499,7 @@ int main(int argc, char* args[])
 
 		clear();
 		
-		drawObject(pixels, Camera, cube);
+		drawObject(pixels, Camera, Sun, cube);
 
 		clock_t start = clock();
 		//While application is running
@@ -503,9 +567,10 @@ int main(int argc, char* args[])
 
 			clear();
 			drawEnv(pixels, Camera);
+			//cube.rotate(0, 0.01, 0.005);
 			//cout << tex[300] << endl;
 			
-			drawObject(pixels, Camera, cube); 
+			drawObject(pixels, Camera, Sun, cube); 
 			//drawObject(pixels, Camera, cube2);
 			
 			SDL_UpdateTexture(screen_texture, NULL, pixels, SCREEN_WIDTH * 4);
@@ -513,6 +578,10 @@ int main(int argc, char* args[])
 			SDL_RenderCopy(renderer, screen_texture, NULL, NULL);
 			//SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255);
 			SDL_RenderPresent(renderer);
+			system("cls");
+			current_timer = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
+			cout << "FPS: " << one / (current_timer - frame_timer);
+			frame_timer = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
 		}
 	}
 
