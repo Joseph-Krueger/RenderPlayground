@@ -1,15 +1,18 @@
 /*This source code copyrighted by Lazy Foo' Productions (2004-2022)
 and may not be redistributed without written permission.*/
-
+#define STB_IMAGE_IMPLEMENTATION
 //Using SDL and standard IO
 #include <SDL.h>
 #include <stdio.h>
 #include <iostream>
 #include <Eigen/Dense>
 #include <time.h>
+#include <stb_image.h>
 
 using namespace Eigen;
 using namespace std;
+
+
 
 Matrix4f rotateMatrix(Vector3f rot);
 Matrix4f translateMatrix(Vector3f pos);
@@ -17,6 +20,7 @@ Matrix4f translateMatrix(Vector3f pos);
 //Screen dimension constants
 const int SCREEN_WIDTH = 900;
 const int SCREEN_HEIGHT = 900;
+float border_const = 0.001;
 
 //Main loop flag
 bool quit = false;
@@ -44,10 +48,14 @@ unsigned int* pixels = (unsigned int*) malloc(SCREEN_WIDTH * SCREEN_HEIGHT * 4);
 
 unsigned int colors[] = { 0xff00ffff, 0x00ffffff, 0xffff00ff, 0x00ff00ff, 0xff0000ff, 0x0000ffff};
 
+int x, y, n;
+//int ok = stbi_info("../checkerboard.png", &x, &y, &n);
+unsigned char *tex = stbi_load("../textures/checkerboard.png", &x, &y, &n, STBI_rgb);
+
 struct Point2D {
 	float x, y, z;
 	int sx, sy;
-	float ux, uy;
+	double ux, uy;
 };
 
 struct Camera3D {
@@ -93,6 +101,7 @@ public:
 	MatrixXf verticies;
 	MatrixXi tris;
 	MatrixXf UVs;
+	MatrixXi UV_Map;
 	unsigned int color;
 
 	void rotate(float alpha, float beta, float gamma) {
@@ -229,11 +238,28 @@ void drawTri(const Point2D& v0, const Point2D& v1, const Point2D& v2, unsigned i
 			if (u >= 0 && v >= 0 && w >= 0) {//&& u + v + w - 1.f <= 0.1f)
 				//printf("%f \n", u+v+ w);
 
-				z = (v0.z * u + v1.z * v + v2.z * w);
+				z = 1/(1/v0.z * u + 1/v1.z * v + 1/v2.z * w);
 				if (z < z_buff[p.sx + p.sy * SCREEN_WIDTH]) {
 					//cout << z << endl;
-					color = (unsigned int)round(((255 / v0.z) * u) * z) << 24 | (unsigned int)round(((255 / v1.z) * v) * z) << 16 | (unsigned int)round(((255 / v2.z) * w) * z) << 8 | (unsigned int)(255);
+					p.ux = (v0.ux * u + v1.ux * v + v2.ux * w) * z;
+					p.uy = (v0.uy * u + v1.uy * v + v2.uy * w) * z;
+					//cout << p.sx << endl;
 
+					int texX = round(p.ux * x);
+					int texY = round(p.uy * y);
+					//cout << tex[texX + texY * x] << endl;
+					//cout << tex[texX + texY * x] << ' ' << tex[1 + texX + texY * x] << " " << tex[2 + texX + texY * x] << endl;
+					
+					if (p.ux <= border_const || p.ux >= 1-border_const || p.uy <= border_const || p.uy >= 1-border_const) {
+						color = 0x000000ff;
+					}
+					else {
+						//color = (unsigned int)0 << 24 | (unsigned int)round(255.f * p.ux) << 16 | (unsigned int)round(255.f * p.uy) << 8 | (unsigned int)(255);
+						color = ((unsigned int)(tex[3*texX + 3*texY * x])) << 24 | ((unsigned int)(tex[1+ 3 * texX + 3 * texY * x])) << 16 | ((unsigned int)(tex[2+ 3 * texX + 3 * texY * x])) << 8 | (unsigned int)(255);
+					}
+					//color = (unsigned int)0 << 24 | (unsigned int)round(255.f * p.ux) << 16 | (unsigned int)round(255.f * p.uy) << 8 | (unsigned int)(255);
+					//color = ((unsigned int)(255*tex[texX + texY * x])) << 24 | ((unsigned int)(255 * tex[texX + texY * x])) << 16 | ((unsigned int)(255 * tex[texX + texY * x])) << 8 | (unsigned int)(255);
+					//cout << color << endl;
 					canvas[p.sx + p.sy * SCREEN_WIDTH] = color;
 					z_buff[p.sx + p.sy * SCREEN_WIDTH] = z;
 				}
@@ -258,18 +284,24 @@ void drawtriangle(unsigned int* canvas, Camera3D camera, Object3D object, int tr
 			v0.x = screen_space_coords(i, 0);
 			v0.y = screen_space_coords(i, 1);
 			v0.z = abs(screen_space_coords(i, 2));
+			v0.ux = object.UVs(object.UV_Map(tri, i), 0)/v0.z;
+			v0.uy = object.UVs(object.UV_Map(tri, i), 1) / v0.z;
 			v0.sx = (int)round(SCREEN_WIDTH * (screen_space_coords(i, 0) / abs(screen_space_coords(i, 2)) + .5));
 			v0.sy = (int)round(SCREEN_HEIGHT * (1-(screen_space_coords(i, 1) / abs(screen_space_coords(i, 2)) + .5)));
 		case 1:
 			v1.x = screen_space_coords(i, 0);
 			v1.y = screen_space_coords(i, 1);
 			v1.z = abs(screen_space_coords(i, 2));
+			v1.ux = object.UVs(object.UV_Map(tri, i), 0)/ v1.z;
+			v1.uy = object.UVs(object.UV_Map(tri, i), 1)/ v1.z;
 			v1.sx = (int)round(SCREEN_WIDTH * (screen_space_coords(i, 0) / abs(screen_space_coords(i, 2)) + .5));
 			v1.sy = (int)round(SCREEN_HEIGHT * (1 - (screen_space_coords(i, 1) / abs(screen_space_coords(i, 2)) + .5)));
 		case 2:
 			v2.x = screen_space_coords(i, 0);
 			v2.y = screen_space_coords(i, 1);
 			v2.z = abs(screen_space_coords(i, 2));
+			v2.ux = object.UVs(object.UV_Map(tri, i), 0) / v2.z;
+			v2.uy = object.UVs(object.UV_Map(tri, i), 1) / v2.z;
 			v2.sx = (int)round(SCREEN_WIDTH * (screen_space_coords(i, 0) / abs(screen_space_coords(i, 2)) + .5));
 			v2.sy = (int)round(SCREEN_HEIGHT * (1 - (screen_space_coords(i, 1) / abs(screen_space_coords(i, 2)) + .5)));
 		}
@@ -285,7 +317,7 @@ void drawObject(unsigned int* canvas, Camera3D camera, Object3D object) {
 	if ((camera.getForward().dot((object.pos - camera.pos).normalized()) >= -0.3)) {
 		return;
 	}
-	for (int tri = 0; tri < object.tris.rows()-1 ; tri++) {
+	for (int tri = 0; tri < object.tris.rows() ; tri++) {
 		//cout << tri << endl;
 		drawtriangle(pixels, camera, object, tri, object.color);
 	}
@@ -326,7 +358,6 @@ void handleInputs(SDL_Event e, Camera3D Camera) {
 
 int main(int argc, char* args[])
 {	
-	
 
 	MatrixXf Vertexes(8, 4); 
 	Vertexes << -.5, -.5, .5, 1,
@@ -353,17 +384,31 @@ int main(int argc, char* args[])
 		0,5,1,
 		0,4,5;
 
-	MatrixXf UVs(3, 2);
+	MatrixXf UVs(4, 2);
 	UVs << 0, 0,
 		0, 1,
 		1, 0,
 		1, 1;
 
-	Object3D cube{ Vector3f{0,0,0}, Vector3f{0,0,0}, Vertexes, Triangles, UVs, 0x00ff00ff};
-	Object3D cube2{ Vector3f{-2,0,-3}, Vector3f{0,.5,0}, Vertexes, Triangles, UVs, 0x00ff00ff };
+	MatrixXi UV_map(12, 3);
+	UV_map << 1,3,2,
+		1,2,0,
+		1,3,2,
+		1,2,0,
+		1,3,2,
+		1,2,0,
+		1,3,2,
+		1,2,0,
+		1,3,2,
+		1,2,0,
+		0,3,2,
+		0,1,3;
+
+	Object3D cube{ Vector3f{0,0,0}, Vector3f{0,0,0}, Vertexes, Triangles, UVs, UV_map, 0x00ff00ff};
+	//Object3D cube2{ Vector3f{-2,0,-3}, Vector3f{0,.5,0}, Vertexes, Triangles, UVs, UV_map, 0x00ff00ff };
 	//int Color_data[] = { 1,1,2,2,2,2,2,2,2,2,2,2 };
 	
-	Camera3D Camera{ Vector3f{-1,0,3},Vector3f{0,0,0}, 1 };
+	Camera3D Camera{ Vector3f{0,0,3},Vector3f{0,0,0}, 1 };
 	
 	float alpha = 0.00;
 	float beta = 0.0;
@@ -444,24 +489,25 @@ int main(int argc, char* args[])
 					case SDLK_z:
 						Camera.translate(0.f, -0.2f, 0.f);
 						break;
+					case SDLK_ESCAPE:
+						quit = true;
+						break;
 					default:
 						break;
 					}
-
+				}
+				if (e.type == SDL_KEYDOWN) {
+					
 				}
 			}
 
 			clear();
 			drawEnv(pixels, Camera);
-			//Camera.rotate(-0.01, 0, 0);
-			//cube.rot += Vector3f{0, .01, 0.02};
-			//cube.translate(sin(clock() / 100.0)/10, 0, 0);
-			//cout << clock() << endl;
-
-			//Camera.rotate(00.0, 0.0, 0.01);
+			//cout << tex[300] << endl;
+			
 			drawObject(pixels, Camera, cube); 
-			drawObject(pixels, Camera, cube2);
-
+			//drawObject(pixels, Camera, cube2);
+			
 			SDL_UpdateTexture(screen_texture, NULL, pixels, SCREEN_WIDTH * 4);
 
 			SDL_RenderCopy(renderer, screen_texture, NULL, NULL);
